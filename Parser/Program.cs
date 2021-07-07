@@ -12,6 +12,11 @@ namespace Parser
     class Program
     {
         //как получить ссылку для перехода к отрасли?
+        // https://www.finam.ru/cache/N72Hgd54/icharts/icharts.js !!!
+        // "2596154":.*?,"'(.*?)'": ""};
+
+        //about <tr name="about">.*?href="(.*?)"
+
         static string url = "https://www.finam.ru/analysis/bundle00006/";
         static string companyNamesUrl = "https://www.finam.ru/analysis/bundle0000200001/";
         static string industriesNamesUrl = "https://www.finam.ru/cache/N72Hgd54/icharts/icharts.js";
@@ -23,7 +28,7 @@ namespace Parser
 
         static void Main(string[] args)
         {
-            //industriesNames = GetIndustriesNames(industriesNamesUrl);
+            industriesNames = GetIndustriesNames(industriesNamesUrl);
             //industriesNews = GetIndustriesNews(industriesNewsUrl);
             companyNames = GetCompanyNames(companyNamesUrl);
         }
