@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Parser.Adapter;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -11,118 +12,62 @@ namespace Parser
 {
     class Program
     {
-        //как получить ссылку для перехода к отрасли?
-        // https://www.finam.ru/cache/N72Hgd54/icharts/icharts.js !!!
-        // "2596154":.*?,"'(.*?)'": ""};
-
-        //about <tr name="about">.*?href="(.*?)"
-
-        static string url = "https://www.finam.ru/analysis/bundle00006/";
-        static string companyNamesUrl = "https://www.finam.ru/analysis/bundle0000200001/";
-        static string industriesNamesUrl = "https://www.finam.ru/cache/N72Hgd54/icharts/icharts.js";
-        static string industriesNewsUrl = "https://www.finam.ru/analysis/bundle00006/?mode=0";
-
-        static List<string> industriesNames;
-        static List<string> industriesNews;
-        static List<string> companyNames;
+        public static IDataAdapter Adapter;
+        public static List<Industry> Industries;
+        public static List<StockExchange> StockExchanges;
 
         static void Main(string[] args)
         {
-            industriesNames = GetIndustriesNames(industriesNamesUrl);
-            //industriesNews = GetIndustriesNews(industriesNewsUrl);
-            companyNames = GetCompanyNames(companyNamesUrl);
+            Adapter = new MySQLDataAdapter();
+            Connect();
+
+            StockExchanges = GetStockExchanges();
+            Industries = GetIndustriesNames();
+        }
+        public static IDataAdapter Connect()
+        {
+            Adapter.Connect(
+                new ConnectionSettings
+                {
+                    CharSet = "UTF8",
+
+                    Host = "127.0.0.1",
+                    Port = "3306",
+                    User = "root",
+                    Password = "1234",
+                    DefaultSchema = "stock_exchange",
+                });
+            return Adapter;
         }
 
-        static List<string> GetIndustriesNames(string url)
+        static List<StockExchange> GetStockExchanges()
         {
-            string pattern = @"(?<=реСторБ1Р1',').*?(?='];)";
-            string text = GetStringFromHtml(url);
+            string pattern = @"title: '(.*?)'";
+
+            List<StockExchange> stockExchanges = new List<StockExchange>();
+
+            string text = Parser.GetStringFromHtml("https://www.finam.ru/profile/np-rts/honeywell-international-inc/export/", Encoding.GetEncoding(1251));
             foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase))
             {
-                return new List<string>(match.ToString().Split(new string[] { "','" }, StringSplitOptions.RemoveEmptyEntries));
+                stockExchanges.Add(new StockExchange(match.Groups[1].Value));
             }
 
-            return null;
+            return stockExchanges;
         }
 
-        static List<string> GetCompanyNames(string url)
+        static List<Industry> GetIndustriesNames()
         {
-            string pattern = @"<div class=""profile-list-item"">.*?"">(.*?)<";
+            string pattern = @"<li class=""index__item--Igi""><a class=""index__menuItem--rwD"" href=""(.*?)"">(.*?)<";
 
-            List<string> companyNames = new List<string>();
+            List<Industry> industries = new List<Industry>();
 
-            string text = GetStringFromHtml(url);
+            string text = Parser.GetStringFromHtml("https://www.finam.ru/quotes/stocks/", Encoding.GetEncoding(1251));
             foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase))
             {
-                if (match.Value != string.Empty)
-                {
-                    companyNames.Add(match.Groups[1].Value);
-                }
+                industries.Add(new Industry(match.Groups[1].Value, match.Groups[2].Value));
             }
 
-            return companyNames;
-        }
-
-        static int GetCountIndustriesNewsPages(string url)
-        {
-            string pattern = @"class=""pager"".*?count=""(.*?)""";
-
-            string text = GetStringFromHtml(url);
-            foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase))
-            {
-                if (match.Value != string.Empty)
-                {
-                    return int.Parse(match.Groups[1].Value);
-                }
-            }
-
-            return -1;
-        }
-
-        static List<string> GetIndustriesNews(string url)
-        {
-            string pattern = @"(?<=""subject"">).*?(?=<\/a>)";
-
-            List<string> news = new List<string>();
-            int count = GetCountIndustriesNewsPages(url);
-
-            for (int i = 1; i <= 30/*count*/; i++)
-            {
-                Console.WriteLine($"Парсим {i} страницу");
-                Thread.Sleep(2000);
-                string pageUrl = url.Substring(0, url.IndexOf('?')) + "?page=" + i.ToString();
-                string text = GetStringFromHtml(pageUrl);
-                foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase))
-                {
-                    if (match.Value != string.Empty)
-                    {
-                        string temp = string.Empty;
-
-                        int beginId = match.Value.IndexOf("<a");
-                        int endId = match.Value.IndexOf(">");
-
-                        temp += match.Value.Substring(0, beginId);
-
-                        temp += match.Value.Substring(endId + 1);
-
-                        news.Add(temp);
-                    }
-                }
-            }
-
-            return news;
-        }
-
-        static string GetStringFromHtml(string url)
-        {
-            using (WebClient client = new WebClient())
-            {
-                client.Encoding = Encoding.GetEncoding(1251);
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
-
-                byte[] htmlData = client.DownloadData(url);
-                return Encoding.GetEncoding(1251).GetString(htmlData);
-            }
+            return industries;
         }
     }
 }
