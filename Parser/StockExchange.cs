@@ -13,14 +13,17 @@ namespace Parser
         public List<Company> Companies { get; set; }
         public Dictionary<Company, List<Quote>> Quotes { get; set; }
 
-        public StockExchange(string title)
+        public StockExchange() 
         {
-            Dictionary<string, object> data = new Dictionary<string, object>();
-            data.Add("Title", title);
-            ID = Program.Adapter.InsertRow("stock_exchanges", data);
-            Title = title;
             Companies = new List<Company>();
             Quotes = new Dictionary<Company, List<Quote>>();
+        }
+        public StockExchange(string title) : this()
+        {
+            Dictionary<string, object> data = new Dictionary<string, object>();
+            data.Add("title", title);
+            ID = Program.Adapter.InsertRow("stock_exchanges", data);
+            Title = title;
         }
     }
 }

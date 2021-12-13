@@ -13,6 +13,8 @@ namespace Parser
         public string Subject { get; set; }
         public string Text { get; set; }
 
+        public CompanyNews() { }
+
         public CompanyNews(DateTime date, string subject, string text)
         {
             Date = date;
@@ -23,10 +25,10 @@ namespace Parser
         public CompanyNews(DateTime date, string subject, string text, long id) : this(date, subject, text)
         {
             Dictionary<string, object> data = new Dictionary<string, object>();
-            data.Add("Date", date.ToString("yyyy-MM-dd"));
-            data.Add("Subject", subject.Length > 50 ? subject.Substring(0, 50) : subject);
-            data.Add("Text", text.Length > 500 ? text.Substring(0, 500) : text);
-            data.Add("Company_id", id);
+            data.Add("date", date.ToString("yyyy-MM-dd"));
+            data.Add("subject", subject.Length > 100 ? subject.Substring(0, 100) : subject);
+            data.Add("text", text.Length > 1000 ? text.Substring(0, 1000) : text);
+            data.Add("company_id", id);
             ID = Program.Adapter.InsertRow("company_news", data);
         }
     }

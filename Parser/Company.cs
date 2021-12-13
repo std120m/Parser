@@ -13,40 +13,44 @@ namespace Parser
         public long ID { get; set; }
         public string Url { get; set; }
         public string Title { get; set; }
+        public string Code { get; set; }
         public List<StockExchange> StockExchanges { get; set; }
         public List<CompanyEvent> Events { get; set; }
         public List<CompanyNews> News { get; set; }
         public Dictionary<StockExchange, List<Quote>> Quotes { get; set; }
 
-        public Company(string url, string title)
+        public Company()
         {
-            Url = url;
-            Title = title;
             StockExchanges = new List<StockExchange>();
             Events = new List<CompanyEvent>();
             News = new List<CompanyNews>();
             Quotes = new Dictionary<StockExchange, List<Quote>>();
         }
 
-        public Company(string url, string title, long id):this(url, title)
+        public Company(string url, string title) : this()
+        {
+            Url = url;
+            Title = title;
+        }
+
+        public Company(string url, string title, string code, long industryId) :this(url, title)
         {
             Dictionary<string, object> data = new Dictionary<string, object>();
-            data.Add("Title", title);
-            data.Add("Url", url);
-            data.Add("Industry_id", id);
+            data.Add("title", title);
+            data.Add("url", url);
+            data.Add("code", code);
+            data.Add("industry_id", industryId);
             ID = Program.Adapter.InsertRow("companies", data);
-            InitNews();
-            InitEvents();
-            InitStockExchanges();
-            GetQuotes();
         }
 
         public void InitStockExchanges()
         {
-            string pattern = @"markets&quot;:[\w\W]+?title&quot;:&quot;(.*?)&quot;,&quot;quotes";
+            string allMarketsPattern = @"markets&quot;:(.+?)}]}]}";
+            string currentMarketPattern = @"{&quot;id.*?title&quot;:&quot;([^\/]+?)&quot;,&quot;quotes&quot;:\[";
 
-            string text = Parser.GetStringFromHtml(Parser.Domen + Url, Encoding.GetEncoding(1251));
-            foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase))
+            string text = Parser.GetStringFromHtml(Program.FinamDomen + Url, Encoding.GetEncoding(1251));
+            text = Regex.Matches(text, allMarketsPattern, RegexOptions.IgnoreCase)[0].Groups[1].Value;
+            foreach (Match match in Regex.Matches(text, currentMarketPattern, RegexOptions.IgnoreCase))
             {
                 StockExchange stockExchange = Program.StockExchanges.Find(s => s.Title == match.Groups[1].Value);
                 stockExchange.Companies.Add(this);
@@ -55,14 +59,21 @@ namespace Parser
         }
         public void InitNews()
         {
+            InitNewsFromDB();
             DateTime date;
             string subject;
             string url;
 
             string pattern = @"<tr class=""news"">[\W\w]+?date"">(.*?)<[\w\W]+?subject"">(.*?) <a href=""(.*?)"">(.*?)<";
-            for (int year = 2015; year <= 2021; year++)
+            int startYear = Program.DateFrom.Year;
+
+            List<Dictionary<string, string>> result = Program.Adapter.GetQueryResult("SELECT `date` FROM company_news where company_id = " + ID + " order by `date` desc limit 1");
+            if (result.Count > 0)
+                startYear = DateTime.ParseExact(result[0]["date"], "dd.MM.yyyy H:mm:ss", null).Year;
+
+            for (int year = startYear; year < Program.DateTo.Year; year++)
             {
-                string text = Parser.GetStringFromHtml(Parser.Domen + Url + $"/mixed/?start-date={year}-01-01&end-date={year}-12-31", Encoding.GetEncoding(1251));
+                string text = Parser.GetStringFromHtml(Program.FinamDomen + Url.Replace("quote", "profile") + $"/mixed/?start-date={year}-01-01&end-date={year}-12-31", Encoding.GetEncoding(1251));
                 foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase))
                 {
                     date = DateTime.ParseExact(match.Groups[1].Value, "dd.MM.yyyy", null);
@@ -70,24 +81,53 @@ namespace Parser
                     url = match.Groups[3].Value;
 
                     string textPattern = @"handmade mid f-newsitem-text[\s\S]+?<p>([\S\s]*?)<\/p";
-                    text = Parser.GetStringFromHtml(Parser.Domen + url, Encoding.GetEncoding(1251));
+                    text = Parser.GetStringFromHtml((url.Contains("http") ? "" : Program.FinamDomen) + url, Encoding.UTF8);
                     foreach (Match match1 in Regex.Matches(text, textPattern, RegexOptions.IgnoreCase))
                     {
-                        News.Add(new CompanyNews(date, subject, match1.Groups[1].Value, ID));
+                        if (News.Find(n => n.Subject == subject && n.Date == date) == null)
+                        {
+                            CompanyNews news = new CompanyNews(date, subject, match1.Groups[1].Value, ID);
+                            News.Add(news);
+                        }
                     }
                 }
             }
         }
+
+        public void InitNewsFromDB()
+        {
+            List<Dictionary<string, string>> result = Program.Adapter.GetQueryResult("select * from company_news where company_id = " + ID);
+            foreach (Dictionary<string, string> row in result)
+            {
+                CompanyNews news = new CompanyNews();
+                news.ID = long.Parse(row["id"]);
+                news.Subject = row["subject"];
+                news.Text = row["text"];
+                news.Date = DateTime.ParseExact(row["date"], "dd.MM.yyyy H:mm:ss", null);
+                if (!News.Contains(news))
+                    News.Add(news);
+            }
+        }
+
         public void InitEvents()
         {
+            InitEventsFromDB();
+
             DateTime date;
             string subject;
             string url;
 
             string pattern = @"<tr class=""news"">[\W\w]+?date"">(.*?)<[\w\W]+?subject"">(.*?) <a href=""(.*?)"">(.*?)<";
-            for (int year = 2015; year <= 2021; year++)
+
+            int startYear = Program.DateFrom.Year;
+
+            List<Dictionary<string, string>> result = Program.Adapter.GetQueryResult("SELECT `date` FROM company_events where company_id = " + ID + " order by `date` desc limit 1");
+            if (result.Count > 0)
+                startYear = DateTime.ParseExact(result[0]["date"], "dd.MM.yyyy H:mm:ss", null).Year;
+
+            for (int year = startYear; year < Program.DateTo.Year; year++)
             {
-                string text = Parser.GetStringFromHtml(Parser.Domen + Url + $"/corporate/?start-date={year}-01-01&end-date={year}-12-31", Encoding.GetEncoding(1251));
+                string text = Parser.GetStringFromHtml(Program.FinamDomen + Url.Replace("quote", "profile") + $"/corporate/?start-date={year}-01-01&end-date={year}-12-31", Encoding.GetEncoding(1251));
                 foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase))
                 {
                     date = DateTime.ParseExact(match.Groups[1].Value, "dd.MM.yyyy", null);
@@ -95,20 +135,38 @@ namespace Parser
                     url = match.Groups[3].Value;
 
                     string textPattern = @"handmade mid f-newsitem-text[\s\S]+?<p>([\S\s]*?)<\/p";
-                    text = Parser.GetStringFromHtml(Parser.Domen + url, Encoding.GetEncoding(1251));
+                    text = Parser.GetStringFromHtml((url.Contains("http") ? "" : Program.FinamDomen) + url, Encoding.GetEncoding(1251));
                     foreach (Match match1 in Regex.Matches(text, textPattern, RegexOptions.IgnoreCase))
                     {
-                        Events.Add(new CompanyEvent(date, subject, match1.Groups[1].Value, ID));
+                        if (Events.Find(e => e.Subject == subject && e.Date == date) == null)
+                        {
+                            Events.Add(new CompanyEvent(date, subject, match1.Groups[1].Value, ID));
+                        }
                     }
                 }
             }            
         }
+        public void InitEventsFromDB()
+        {
+            List<Dictionary<string, string>> result = Program.Adapter.GetQueryResult("select * from company_events where company_id = " + ID);
+            foreach (Dictionary<string, string> row in result)
+            {
+                CompanyEvent companyEvent = new CompanyEvent();
+                companyEvent.ID = long.Parse(row["id"]);
+                companyEvent.Subject = row["subject"];
+                companyEvent.Text = row["text"];
+                companyEvent.Date = DateTime.ParseExact(row["date"], "dd.MM.yyyy H:mm:ss", null);
+                if (!Events.Contains(companyEvent))
+                    Events.Add(companyEvent);
+            }
+        }
 
         public void GetQuotes()
         {
+            GetQuotesFromDB();
             string paramsPattern = @"Finam.IssuerProfile.Main.issue[\w\W]+?""id"": (.*?), ""code"": ""(.*?)""[\w\W]+?""market"": {""id"": (.*?), ""title"": ""(.*?)""";
 
-            string text = Parser.GetStringFromHtml(Parser.Domen + Url + "export", Encoding.GetEncoding(1251));
+            string text = Parser.GetStringFromHtml(Program.FinamDomen + Url.Replace("quote", "profile") + "export", Encoding.GetEncoding(1251));
 
             string stockId = string.Empty;
             string stockName = string.Empty;
@@ -122,75 +180,64 @@ namespace Parser
                 stockId = match.Groups[3].Value;
                 stockName = match.Groups[4].Value;
             }
-            DateTime dateFrom = new DateTime(2015, 7, 9);
-            DateTime dateTo = new DateTime(2021, 7, 9);
-            
-            //Period keys
-            //1  -  тики,
-            //2  -  1 мин.,
-            //3  -  5 мин.,
-            //4  -  10 мин.,
-            //5  -  15 мин.,
-            //6  -  30 мин.,
-            //7  -  1 час,
-            //8  -  1 день,
-            //9  -  1 неделя,
-            //10 -  1 месяц
-            int period = 7;
-            string ext = ".txt";
-
-            //date format keys
-            //1 — ггггммдд,
-            //2 — ггммдд,
-            //3 — ддммгг,
-            //4 — дд/мм/гг,
-            //5 — мм/дд/гг
-            int dtf = 4;
-
-            //time format keys
-            //1 — ччммсс,
-            //2 — ччмм,
-            //3 — чч:мм:сс,
-            //4 — чч:мм
-            int tmf = 4;
-
-            //msor keys
-            //0 — начала свечи,
-            //1 — окончания свечи
-            int msor = 1;
-
-            //separator keys
-            //1 — запятая(,),
-            //2 — точка(.),
-            //3 — точка с запятой(;),
-            //4 — табуляция(»),
-            //5 — пробел()
-            int sep = 3;
+            Code = companyCode;
+            Program.Adapter.UpdateRow("companies", ID, new Dictionary<string, object>() { { "code", companyCode } });
 
             StockExchange stockExchange = StockExchanges.Find(s => s.Title == stockName);
 
-            string url = $"http://export.finam.ru/{companyCode}_{dateFrom.ToString("yyMMdd")}_{dateTo.ToString("yyMMdd")}{ext}?market={stockId}&em={companyId}&code={companyCode}&apply=0&df={dateFrom.Day}&mf={dateFrom.Month - 1}&yf={dateFrom.Year}&from={dateFrom.ToString("dd.MM.yyyy")}&dt={dateTo.Day}&mt={dateTo.Month - 1}&yt={dateTo.Year}&to={dateTo.ToString("dd.MM.yyyy")}&p={period}&f={companyCode}_{dateFrom.ToString("yyMMdd")}_{dateTo.ToString("yyMMdd")}&e={ext}&cn={companyCode}&dtf={dtf}&tmf={tmf}&MSOR={msor}&mstime=on&mstimever=1&sep={sep}&sep2=1&datf=1&at=0";
-
-            text = Parser.GetStringFromHtml(url, Encoding.UTF8);
-            List<Quote> quotes = new List<Quote>();
-            string[] lines = text.Split(new string[] { "\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (string line in lines)
+            if (!Quotes.Keys.Contains(stockExchange))
             {
-                string[] tokens = line.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                string date = tokens[2];
-                string time = tokens[3];
-                DateTime timestamp = DateTime.ParseExact(date + " " + time, "dd/MM/yy HH:mm", null);
-                double open = double.Parse(tokens[4].Replace('.', ','));
-                double close = double.Parse(tokens[7].Replace('.', ','));
-                double low = double.Parse(tokens[6].Replace('.', ','));
-                double high = double.Parse(tokens[5].Replace('.', ','));
-                int count = int.Parse(tokens[8]);
-                quotes.Add(new Quote(timestamp, open, close, low, high, count, ID, stockExchange.ID));
-            }
+                List<Quote> quotes = new List<Quote>();
 
-            Quotes.Add(stockExchange, quotes);
-            stockExchange.Quotes.Add(this, quotes);
+                string filepath = Parser.ParseQuotes(this);
+                using (var reader = new StreamReader(filepath))
+                {
+                    while (!reader.EndOfStream)
+                    {
+                        string line = reader.ReadLine();
+                        string[] values = line.Split(',');
+                        if (values.Length == 1)
+                            continue;
+                        string date = values[2];
+                        string time = values[3];
+                        DateTime timestamp = DateTime.ParseExact(date + " " + time, "yyyyMMdd HHmmss", null);
+                        double open = double.Parse(values[4].Replace('.', ','));
+                        double close = double.Parse(values[7].Replace('.', ','));
+                        double low = double.Parse(values[6].Replace('.', ','));
+                        double high = double.Parse(values[5].Replace('.', ','));
+                        long count = long.Parse(values[8]);
+
+                        quotes.Add(new Quote(timestamp, open, close, low, high, count, ID, stockExchange.ID));
+                    }
+                }
+                Quotes.Add(stockExchange, quotes);
+                stockExchange.Quotes.Add(this, quotes);
+            }
+        }
+
+        public void GetQuotesFromDB()
+        {
+            foreach (StockExchange stockExchange in StockExchanges)
+            {
+                List<Dictionary<string, string>> result = Program.Adapter.GetQueryResult($"select * from quotes where company_id = '{ID}' and  stock_exchanges_id = '{stockExchange.ID}'");
+                foreach (Dictionary<string, string> row in result)
+                {
+                    Quote quote = new Quote();
+                    quote.ID = long.Parse(row["id"]);
+                    quote.Open = double.Parse(row["open"]);
+                    quote.Close = double.Parse(row["close"]);
+                    quote.Low = double.Parse(row["low"]);
+                    quote.High = double.Parse(row["high"]);
+                    quote.Count = long.Parse(row["count"]);
+                    quote.Timestamp = DateTime.ParseExact(row["timestamp"], "dd.MM.yyyy H:mm:ss", null);
+
+                    if (!Quotes.Keys.Contains(stockExchange))
+                        Quotes.Add(stockExchange, new List<Quote>());
+
+                    if (!Quotes[stockExchange].Contains(quote))
+                        Quotes[stockExchange].Add(quote);
+                }
+            }
         }
     }
 }
